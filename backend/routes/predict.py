@@ -1,27 +1,96 @@
-from fastapi import APIRouter
+# existing imports
+from fastapi import APIRouter, Depends, UploadFile, File
+from sqlalchemy.orm import Session
+import pandas as pd
+
+from database import get_db
 from models.student import Student
 from services.predict_service import predict
+from schemas.student_schema import StudentInput
 
 router = APIRouter()
 
-@router.post("/predict")
-def predict_dropout(student: Student):
-    result = predict(student.dict())
-    
-    # result will now return probability
-    confidence = result["confidence"]
-    prediction = result["prediction"]
 
-    # Risk categorization
-    if confidence < 0.4:
-        risk_level = "Low"
-    elif confidence < 0.7:
-        risk_level = "Medium"
-    else:
-        risk_level = "High"
+# -------------------------
+# 🔹 SINGLE PREDICTION
+# -------------------------
+@router.post("/predict")
+def predict_student(data: StudentInput, db: Session = Depends(get_db)):
+
+    input_data = data.dict()
+    result = predict(input_data)   # now returns dict
+
+    student = Student(
+        name=input_data["name"],
+        attendance=input_data["attendance"],
+        marks=input_data["marks"],
+        prev_marks=input_data["prev_marks"],
+        backlogs=input_data["backlogs"],
+        mental_stress=input_data["mental_stress"],
+        study_hours=input_data["study_hours"],
+        assignment=input_data["assignment"],
+        dropout=(result["risk"] == "High")   # 🔥 important change
+    )
+
+    db.add(student)
+    db.commit()
+    db.refresh(student)
 
     return {
-        "prediction": prediction,
-        "confidence": round(confidence, 2),
-        "risk_level": risk_level
+        "risk": result["risk"],
+        "probability": result["probability"],
+        "student_id": student.id
+    }
+
+
+# -------------------------
+# 🔹 BULK PREDICTION
+# -------------------------
+@router.post("/predict-bulk")
+def predict_bulk(file: UploadFile = File(...), db: Session = Depends(get_db)):
+
+    df = pd.read_csv(file.file)
+
+    results = []
+
+    for _, row in df.iterrows():
+
+        data = {
+            "name": row.get("name", "Unknown"),
+            "attendance": int(row["attendance"]),
+            "marks": int(row["marks"]),
+            "prev_marks": int(row["prev_marks"]),
+            "backlogs": int(row["backlogs"]),
+            "mental_stress": int(row["mental_stress"]),
+            "study_hours": int(row["study_hours"]),
+            "assignment": int(row["assignment"])
+        }
+
+        result = predict(data)
+
+        student = Student(
+            name=data["name"],
+            attendance=data["attendance"],
+            marks=data["marks"],
+            prev_marks=data["prev_marks"],
+            backlogs=data["backlogs"],
+            mental_stress=data["mental_stress"],
+            study_hours=data["study_hours"],
+            assignment=data["assignment"],
+            dropout=(result["risk"] == "High")   # 🔥 same change
+        )
+
+        db.add(student)
+
+        results.append({
+            "name": data["name"],
+            "risk": result["risk"],
+            "probability": result["probability"]
+        })
+
+    db.commit()
+
+    return {
+        "total_students": len(results),
+        "results": results
     }

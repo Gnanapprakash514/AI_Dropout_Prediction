@@ -1,6 +1,10 @@
 from fastapi import FastAPI
-from routes.predict import router as predict_router
+from database import engine, Base
+from models.student import Student
+from routes import predict
+
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
-app.include_router(predict_router)
+app.include_router(predict.router)
