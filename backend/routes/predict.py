@@ -5,6 +5,7 @@ import pandas as pd
 
 from database import get_db
 from models.student import Student
+from models.prediction import Prediction
 from services.predict_service import predict
 from schemas.student_schema import StudentInput
 
@@ -35,6 +36,14 @@ def predict_student(data: StudentInput, db: Session = Depends(get_db)):
     db.add(student)
     db.commit()
     db.refresh(student)
+
+    prediction = Prediction(
+        student_id=student.id,
+        risk_level=result["risk"],
+        probability=result["probability"]
+    )
+    db.add(prediction)
+    db.commit()
 
     return {
         "risk": result["risk"],
@@ -81,6 +90,14 @@ def predict_bulk(file: UploadFile = File(...), db: Session = Depends(get_db)):
         )
 
         db.add(student)
+        db.flush()  # get student.id before commit
+
+        prediction = Prediction(
+            student_id=student.id,
+            risk_level=result["risk"],
+            probability=result["probability"]
+        )
+        db.add(prediction)
 
         results.append({
             "name": data["name"],
